@@ -30,10 +30,16 @@ class Analysis:
     correlation: float
 
 
-def trend(df: pd.DataFrame, start: date | None = None) -> Trend:
-    """start 이후 구간만 평균=100으로 맞추고 직선 추세를 구한다."""
+def trend(
+    df: pd.DataFrame, start: date | None = None, end: date | None = None
+) -> Trend:
+    """start~end 구간(양 끝 포함)만 평균=100으로 맞추고 직선 추세를 구한다."""
     if start is not None:
         df = df[df["date"] >= pd.Timestamp(start)]
+    if end is not None:
+        df = df[df["date"] <= pd.Timestamp(end)]
+    if len(df) < 2:
+        raise ValueError("추세를 구하려면 데이터가 2개 이상 필요합니다.")
     df = df.sort_values("date")
 
     index = df["activeness"] / df["activeness"].mean() * INDEX_BASE
@@ -54,15 +60,15 @@ def decline_slop_correlation(slopes: dict[str, float], slop: dict[str, float]) -
 
 
 def load_bluesky(path: Path) -> pd.DataFrame:
-    # 마지막 두 열의 한글 머리글이 깨져 있어 위치로 읽는다: 9=이상치 표시, 10=활성화도
+    # 활성화도 = 좋아요 / 게시물 수². a로 표시된 행은 앞뒤 평균으로 대체한 값이므로 포함한다.
+    # CSV의 활성화도 열은 좋아요·게시물을 보정한 뒤 갱신되지 않은 행이 있어 쓰지 않는다.
     raw = pd.read_csv(path, encoding="cp949", encoding_errors="replace")
-    flagged = raw.iloc[:, 9].notna()
     return pd.DataFrame(
         {
-            "date": pd.to_datetime(raw.iloc[:, 0][~flagged]),
-            "activeness": raw.iloc[:, 10][~flagged].astype(float),
+            "date": pd.to_datetime(raw["date"]),
+            "activeness": raw["num_likes"] / raw["num_posts"] ** 2,
         }
-    ).reset_index(drop=True)
+    )
 
 
 def load_mastodon(path: Path) -> pd.DataFrame:
@@ -76,8 +82,8 @@ def load_mastodon(path: Path) -> pd.DataFrame:
 
 
 def load_steam(path: Path) -> pd.DataFrame:
-    # 머리글이 없다. 두 숫자 열은 접속자, 게임 중으로 추정한다.
-    # 최근 데이터만 10분 단위이므로 하루 평균으로 맞춘 뒤 게임 중 / 접속자² 를 구한다.
+    # 머리글이 없고, 숫자 열은 순서대로 users, in-game이다.
+    # 최근 데이터만 10분 단위이므로 하루 평균으로 맞춘 뒤 in-game / users² 를 구한다.
     raw = pd.read_csv(
         path, encoding="utf-8-sig", header=None, names=["time", "users", "in_game"]
     )
@@ -97,11 +103,11 @@ def load_sites(data_dir: Path = DATA_DIR) -> dict[str, tuple[pd.DataFrame, float
     """{사이트: (활성화도, 평균 AI slop 비율)}"""
     return {
         "Bluesky": (
-            load_bluesky(data_dir / "bluesky_statistics.csv"),
+            load_bluesky(data_dir / "bluesky_statistics_fixed.csv"),
             load_slop_average(data_dir / "bluesky_ai_slop.csv"),
         ),
         "Steam": (
-            load_steam(data_dir / "steamdb_chart_753.csv"),
+            load_steam(data_dir / "steamdb_chart_753_fixed.csv"),
             load_slop_average(data_dir / "steam_ai_slop.csv"),
         ),
         "Mastodon": (
@@ -112,9 +118,11 @@ def load_sites(data_dir: Path = DATA_DIR) -> dict[str, tuple[pd.DataFrame, float
 
 
 def analyze(
-    sites: dict[str, tuple[pd.DataFrame, float]], start: date | None = None
+    sites: dict[str, tuple[pd.DataFrame, float]],
+    ranges: dict[str, tuple[date | None, date | None]],
 ) -> Analysis:
-    trends = {name: trend(df, start) for name, (df, _) in sites.items()}
+    """ranges: {사이트: (시작, 끝)}. 사이트마다 다른 기간을 쓸 수 있고, None은 제한 없음."""
+    trends = {name: trend(df, *ranges[name]) for name, (df, _) in sites.items()}
     slopes = {name: t.slope_pct_per_year for name, t in trends.items()}
     slop = {name: value for name, (_, value) in sites.items()}
     return Analysis(

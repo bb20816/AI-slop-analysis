@@ -43,6 +43,41 @@ def test_trend_start_drops_earlier_rows_and_rebases_the_mean():
     assert result.points["index"].tolist() == pytest.approx([50.0, 150.0])
 
 
+def test_trend_end_drops_later_rows_and_keeps_the_end_date():
+    df = series(("2020-01-01", 1), ("2021-01-01", 3), ("2022-01-01", 100))
+
+    result = analysis.trend(df, end=date(2021, 1, 1))
+
+    assert result.points["date"].max() == pd.Timestamp("2021-01-01")
+    assert result.points["index"].tolist() == pytest.approx([50.0, 150.0])
+
+
+def test_trend_rejects_a_range_with_fewer_than_two_points():
+    df = series(("2020-01-01", 1), ("2021-01-01", 3))
+
+    with pytest.raises(ValueError):
+        analysis.trend(df, start=date(2020, 6, 1))
+
+
+def test_analyze_applies_each_sites_own_range():
+    rising = series(("2020-01-01", 1), ("2021-01-01", 2), ("2022-01-01", 3))
+    falling = series(("2020-01-01", 3), ("2021-01-01", 2), ("2022-01-01", 1))
+    sites = {"a": (rising, 1.0), "b": (falling, 2.0), "c": (rising, 3.0)}
+    ranges = {
+        "a": (date(2021, 1, 1), None),
+        "b": (None, date(2021, 1, 1)),
+        "c": (None, None),
+    }
+
+    result = analysis.analyze(sites, ranges)
+
+    assert len(result.trends["a"].points) == 2
+    assert result.trends["a"].points["date"].min() == pd.Timestamp("2021-01-01")
+    assert len(result.trends["b"].points) == 2
+    assert result.trends["b"].points["date"].max() == pd.Timestamp("2021-01-01")
+    assert len(result.trends["c"].points) == 3
+
+
 def test_trend_line_passes_through_the_mean_of_the_data():
     df = series(("2020-01-01", 1), ("2021-01-01", 5), ("2022-01-01", 3))
 
@@ -65,19 +100,20 @@ def test_correlation_is_negative_when_more_slop_goes_with_a_rise():
     assert analysis.decline_slop_correlation(slopes, slop) == pytest.approx(-1.0)
 
 
-def test_load_bluesky_skips_rows_flagged_as_outliers(tmp_path):
+def test_load_bluesky_computes_activeness_from_likes_and_posts_including_flagged_rows(tmp_path):
+    # 첫 행의 활성화도 열(0.9)은 좋아요/게시물을 고친 뒤 갱신되지 않은 값이다.
     path = tmp_path / "bluesky.csv"
     path.write_bytes(
         b"date,num_likes,num_likers,num_posters,num_posts,num_follows,"
         b"num_followers,num_blocks,num_blockers,\xff\xfe(a),\xff\xfe\n"
-        b"2026-10-30,1,1,1,1,1,1,1,1,,0.5\n"
-        b"2023-03-01,1,1,1,1,1,1,1,1,a,70\n"
+        b"2026-10-30,8,1,1,2,1,1,1,1,,0.9\n"
+        b"2023-03-01,5,1,1,10,1,1,1,1,a,70\n"
     )
 
     df = analysis.load_bluesky(path)
 
-    assert df["date"].tolist() == [pd.Timestamp("2026-10-30")]
-    assert df["activeness"].tolist() == [0.5]
+    assert df["date"].tolist() == [pd.Timestamp("2026-10-30"), pd.Timestamp("2023-03-01")]
+    assert df["activeness"].tolist() == pytest.approx([2.0, 0.05])
 
 
 def test_load_mastodon_parses_year_month_labels(tmp_path):
@@ -127,8 +163,8 @@ def test_load_slop_average_reads_the_precomputed_cell(tmp_path):
 @pytest.mark.parametrize(
     ("start", "bluesky", "steam", "mastodon", "correlation"),
     [
-        (None, -87.90, -6.29, -9.11, 0.970),
-        (date(2024, 9, 7), 12.31, 0.19, -2.09, -0.998),
+        (None, -142.72, -6.30, -9.11, 0.973),
+        (date(2024, 9, 7), 12.64, 0.16, -2.09, -0.997),
         (date(2026, 3, 8), 19.70, 28.74, 15.83, 0.011),
     ],
 )
@@ -136,7 +172,8 @@ def test_real_data_matches_the_independent_calculation(
     start, bluesky, steam, mastodon, correlation
 ):
     # 기대값은 이 모듈을 쓰지 않고 표준 라이브러리로 따로 계산한 결과다.
-    result = analysis.analyze(analysis.load_sites(), start=start)
+    sites = analysis.load_sites()
+    result = analysis.analyze(sites, {name: (start, None) for name in sites})
 
     assert result.slopes["Bluesky"] == pytest.approx(bluesky, abs=0.01)
     assert result.slopes["Steam"] == pytest.approx(steam, abs=0.01)
