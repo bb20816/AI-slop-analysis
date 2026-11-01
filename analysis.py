@@ -113,13 +113,7 @@ def load_bluesky(path: Path) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "date": pd.to_datetime(raw["date"]),
-<<<<<<< HEAD
-            "activeness": (raw["num_likes"] / (raw["num_posts"] ** 1.3))**1,
-            #"activeness": (raw["num_likes"] / (raw["num_posts"] ** 1.5))**0.5,
-            #"activeness": (raw["num_likes"] / raw["num_posts"]),
-=======
             "activeness": raw["num_likes"] / (raw["num_posts"] ** 1.3),
->>>>>>> 29c5f93 (수정 계획서 내용으로 그래프들 추가 및 삭제)
         }
     )
 
