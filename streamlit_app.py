@@ -1,16 +1,12 @@
-from datetime import date
-
 import altair as alt
 import pandas as pd
 import streamlit as st
 
 import analysis
 
-PERIODS: dict[str, date | None] = {
-    "사이트별 전체 기간 (메인)": None,
-    "2024년 9월 7일 이후": date(2024, 9, 7),
-    "2026년 3월 8일 이후": date(2026, 3, 8),
-}
+# ── 맨 위 그래프의 제목과 부제목: 아래 두 값을 원하는 문구로 고치세요 ──────────────
+SLOP_TITLE = "플랫폼별 AI slop 콘텐츠 비율 추이"
+SLOP_SUBTITLE = "여기에 설명을 입력하세요. (streamlit_app.py 위쪽의 SLOP_SUBTITLE을 고치면 바뀝니다.)"
 
 # Steam과 Mastodon은 세로축을 넓게 고정한다. Bluesky는 값의 범위가 훨씬 커서 자동으로 둔다.
 FIXED_Y_RANGE = {"Steam": [0, 300], "Mastodon": [0, 300]}
@@ -36,6 +32,11 @@ DARK = {
 @st.cache_data
 def load_sites():
     return analysis.load_sites()
+
+
+@st.cache_data
+def load_slop_series():
+    return analysis.load_slop_series_all()
 
 
 def signed(value: float, digits: int = 1) -> str:
@@ -81,53 +82,115 @@ def site_chart(name: str, result: analysis.Analysis, colors: dict) -> alt.LayerC
     return (line + fit + hover).properties(height=280)
 
 
-def slop_chart(result: analysis.Analysis, colors: dict) -> alt.LayerChart:
-    data = pd.DataFrame(
+def slop_timeline_chart(series: dict[str, pd.DataFrame], colors: dict) -> alt.LayerChart:
+    """플랫폼별 AI slop 비율(실선)과 전체 구간 평균(같은 색 점선)을 한 그래프에 그린다."""
+    names = list(series)
+    lines = pd.concat(
+        [df.assign(사이트=name) for name, df in series.items()], ignore_index=True
+    ).rename(columns={"date": "날짜", "ai_percentage": "AI slop 비율(%)"})
+    averages = pd.DataFrame(
         {
-            "사이트": list(result.slop),
-            "평균 AI slop 비율(%)": list(result.slop.values()),
-            "연간 변화(%/년)": [result.slopes[name] for name in result.slop],
+            "사이트": names,
+            "전체 구간 평균(%)": [series[name]["ai_percentage"].mean() for name in names],
         }
     )
-    names = list(result.slop)
-    x = alt.X(
-        "평균 AI slop 비율(%):Q",
-        scale=alt.Scale(domain=[0, 16]),
-        axis=alt.Axis(values=list(range(0, 17, 2)), grid=False),
-        title="평균 AI slop 비율 (%)",
-    )
-    y = alt.Y("연간 변화(%/년):Q", title="활성화도 연간 변화 (%/년, 평균 대비)")
 
-    zero = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(color=colors["baseline"]).encode(y="y:Q")
-    points = (
-        alt.Chart(data)
-        .mark_point(filled=True, size=140, opacity=1)
+    color = alt.Color(
+        "사이트:N",
+        scale=alt.Scale(domain=names, range=[colors[n] for n in names]),
+        legend=alt.Legend(title=None, orient="top"),
+    )
+    x = alt.X("날짜:T", title=None, axis=alt.Axis(format="%Y-%m", tickCount=8))
+    y_title = "AI slop 비율 (%)"
+    scale = alt.Scale(domainMin=0)
+
+    line = (
+        alt.Chart(lines)
+        .mark_line(strokeWidth=1.5, point=alt.OverlayMarkDef(size=18))
         .encode(
             x=x,
-            y=y,
-            color=alt.Color(
-                "사이트:N",
-                scale=alt.Scale(domain=names, range=[colors[n] for n in names]),
-                legend=alt.Legend(title=None, orient="top"),
-            ),
+            y=alt.Y("AI slop 비율(%):Q", title=y_title, scale=scale),
+            color=color,
             tooltip=[
                 "사이트:N",
-                alt.Tooltip("평균 AI slop 비율(%):Q", format=".2f"),
-                alt.Tooltip("연간 변화(%/년):Q", format="+.1f"),
+                alt.Tooltip("날짜:T", format="%Y-%m-%d"),
+                alt.Tooltip("AI slop 비율(%):Q", format=".2f"),
             ],
         )
     )
-    labels = (
-        alt.Chart(data)
-        .mark_text(align="left", dx=10, color=colors["ink"], fontSize=13)
-        .encode(x=x, y=y, text="사이트:N")
+    average = (
+        alt.Chart(averages)
+        .mark_rule(strokeWidth=2, strokeDash=[6, 4])
+        .encode(
+            y=alt.Y("전체 구간 평균(%):Q", title=y_title, scale=scale),
+            color=color,
+            tooltip=["사이트:N", alt.Tooltip("전체 구간 평균(%):Q", format=".2f")],
+        )
     )
-    return (zero + points + labels).properties(height=340)
+    return (line + average).properties(height=340)
+
+
+def decline_chart(
+    changes: dict[str, analysis.EdgeChange], slop: dict[str, float], colors: dict
+) -> alt.LayerChart:
+    """플랫폼마다 과거(=100)와 현재 활성화도 막대를 나란히 그리고, 위에 감소율을 적는다."""
+    names = list(changes)
+    labels = {name: f"{name} ({slop[name]:.2f}%)" for name in names}
+    order = list(labels.values())
+
+    rows = []
+    for name in names:
+        change = changes[name]
+        rows.append(
+            {"플랫폼": labels[name], "시점": "과거", "활성화도": analysis.INDEX_BASE, "색": colors["secondary"]}
+        )
+        rows.append(
+            {"플랫폼": labels[name], "시점": "현재", "활성화도": change.current_index, "색": colors[name]}
+        )
+    data = pd.DataFrame(rows)
+    drops = pd.DataFrame(
+        {
+            "플랫폼": order,
+            "감소율": [f"{changes[name].change_pct:+.1f}%" for name in names],
+            "위치": [analysis.INDEX_BASE * 1.2] * len(names),
+        }
+    )
+
+    x = alt.X("플랫폼:N", sort=order, title=None, axis=alt.Axis(labelAngle=0, labelFontSize=13))
+    offset = alt.XOffset("시점:N", sort=["과거", "현재"])
+    y = alt.Y(
+        "활성화도:Q",
+        title="활성화도 (과거 = 100)",
+        scale=alt.Scale(domain=[0, analysis.INDEX_BASE * 1.3]),
+    )
+
+    bars = (
+        alt.Chart(data)
+        .mark_bar()
+        .encode(
+            x=x,
+            xOffset=offset,
+            y=y,
+            color=alt.Color("색:N", scale=None, legend=None),
+            tooltip=["플랫폼:N", "시점:N", alt.Tooltip("활성화도:Q", format=".1f")],
+        )
+    )
+    values = (
+        alt.Chart(data)
+        .mark_text(dy=-8, fontSize=12, color=colors["ink"])
+        .encode(x=x, xOffset=offset, y=y, text=alt.Text("활성화도:Q", format=".1f"))
+    )
+    drop_text = (
+        alt.Chart(drops)
+        .mark_text(fontSize=16, fontWeight="bold", color=colors["ink"])
+        .encode(x=x, y=alt.Y("위치:Q", scale=alt.Scale(domain=[0, analysis.INDEX_BASE * 1.3])), text="감소율:N")
+    )
+    return (bars + values + drop_text).properties(height=340)
 
 
 def period_sliders(sites: dict) -> dict:
     st.sidebar.header("분석 기간")
-    st.sidebar.caption("그래프마다 기간을 따로 정합니다. 처음에는 전체 기간입니다.")
+    st.sidebar.caption("사이트별 추세 그래프와 과거 대비 현재 막대 그래프에 적용됩니다. 처음에는 전체 기간입니다.")
     ranges = {}
     for name, (df, _) in sites.items():
         first, last = df["date"].min().date(), df["date"].max().date()
@@ -142,21 +205,25 @@ def period_sliders(sites: dict) -> dict:
     return ranges
 
 
-def summary_table(sites: dict) -> pd.DataFrame:
-    rows = []
-    for label, start in PERIODS.items():
-        result = analysis.analyze(sites, {name: (start, None) for name in sites})
-        rows.append(
-            {
-                "비교 기간": label,
-                **{f"{n} (%/년)": signed(result.slopes[n]) for n in result.slopes},
-                "하락폭-AI slop 상관계수": f"{result.correlation:+.2f}",
-            }
-        )
-    return pd.DataFrame(rows)
-
-
 st.set_page_config(page_title="AI Slop Analysis", layout="wide")
+
+colors = DARK if st.context.theme.type == "dark" else LIGHT
+
+# ── 맨 위: 플랫폼별 AI slop 비율 추이 (기간 슬라이더 없음, 항상 전체 기간) ─────────
+slop_series = load_slop_series()
+st.header(SLOP_TITLE)
+st.markdown(SLOP_SUBTITLE)
+st.altair_chart(slop_timeline_chart(slop_series, colors), width="stretch")
+st.caption(
+    "실선은 날짜별 AI slop 비율, 같은 색 점선은 해당 플랫폼의 전체 구간 평균입니다. "
+    + " · ".join(
+        f"{name} 평균 {df['ai_percentage'].mean():.2f}% "
+        f"({df['date'].min():%Y-%m-%d} ~ {df['date'].max():%Y-%m-%d}, {len(df)}개)"
+        for name, df in slop_series.items()
+    )
+)
+st.divider()
+
 st.title("AI Slop Analysis")
 st.markdown(
     "AI slop 비율이 높은 사이트일수록 활성화도가 빠르게 떨어지는지 살펴봅니다. "
@@ -164,7 +231,6 @@ st.markdown(
     "비례 관계를 입증한 결과는 아닙니다.**"
 )
 
-colors = DARK if st.context.theme.type == "dark" else LIGHT
 sites = load_sites()
 
 ranges = period_sliders(sites)
@@ -183,23 +249,20 @@ st.caption(
     "다르므로, 기울기는 선의 모양이 아니라 각 그래프 위의 '연 %' 숫자로 비교하세요."
 )
 
-st.subheader("추세 기울기와 AI slop 비율")
+st.subheader("과거 대비 현재 활성화도")
+changes = {name: analysis.edge_change(df, *ranges[name]) for name, (df, _) in sites.items()}
 st.markdown(
-    f"사이드바에서 선택한 기간 기준으로 하락폭과 AI slop 비율의 상관계수는 **{result.correlation:+.2f}**입니다. "
-    "사이트가 3개뿐이라 통계적 근거로 쓰기에는 부족합니다."
+    "각 플랫폼의 **과거** 활성화도를 100으로 놓았을 때 **현재** 활성화도가 얼마인지 보여줍니다. "
+    f"과거는 선택한 기간의 처음 {analysis.EDGE_FRACTION:.0%}, 현재는 끝 {analysis.EDGE_FRACTION:.0%}의 "
+    "평균입니다. 가로축 이름 옆 괄호는 평균 AI slop 비율입니다."
 )
-st.altair_chart(slop_chart(result, colors), width="stretch")
-
-st.subheader("세 기간 비교")
-st.caption("사이드바 슬라이더와 관계없이 고정된 기간으로 계산한 표입니다.")
-st.dataframe(summary_table(sites), hide_index=True, width="stretch")
-st.markdown(
-    "- **전체 기간:** 상관계수는 높지만 Bluesky의 큰 하락 하나에 크게 좌우됩니다. "
-    "Steam과 Mastodon만 보면 AI slop 비율이 더 높은 Steam의 하락폭이 더 작습니다.\n"
-    "- **2024년 9월 7일 이후:** Bluesky의 `a` 표시 구간이 끝난 다음 날부터입니다. "
-    "관계가 반대로 나타납니다.\n"
-    "- **2026년 3월 8일 이후:** AI slop 데이터가 있는 기간에 가장 가깝고, "
-    "세 사이트 모두 활성화도가 올랐습니다. 약 7개월뿐이고 Mastodon은 월별 데이터 7개입니다."
+st.altair_chart(decline_chart(changes, result.slop, colors), width="stretch")
+st.caption(
+    "왼쪽 회색 막대가 과거, 오른쪽 색 막대가 현재이고 위의 %는 과거 대비 변화입니다. "
+    + " · ".join(
+        f"{name}: 과거·현재 각 {change.rows}개 평균 ({ranges[name][0]} ~ {ranges[name][1]})"
+        for name, change in changes.items()
+    )
 )
 
 st.subheader("계산 기준과 한계")
@@ -207,7 +270,7 @@ st.markdown(
     "- **단위 맞추기:** 각 사이트의 활성화도를 선택한 기간의 자기 평균으로 나눠 평균을 100으로 "
     "맞춘 뒤 직선 추세를 구합니다. 기울기는 1년에 평균의 몇 %씩 변하는지를 뜻합니다.\n"
     "- **Bluesky:** 이용자 수 데이터는 기간이 너무 짧아, 게시물에 얼마나 긍정적으로 반응하는지를 보는 "
-    "`좋아요 / 게시물 수²`를 썼습니다. 앞뒤 평균으로 대체한 `a` 표시 값 65일과 2025년 4월 22일 "
+    "`좋아요 / 게시물 수^1.3`을 썼습니다. 앞뒤 평균으로 대체한 `a` 표시 값 65일과 2025년 4월 22일 "
     "보정값을 포함합니다.\n"
     "- **Mastodon:** CSV의 `activeness` 열을 그대로 썼습니다.\n"
     "- **Steam:** 활성화도 열이 없어 `in-game / users²`를 하루 평균으로 계산했습니다. "
