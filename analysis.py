@@ -66,8 +66,9 @@ def load_bluesky(path: Path) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "date": pd.to_datetime(raw["date"]),
-            "activeness": (raw["num_likes"] / (raw["num_posts"] ** 1.5))**0.5,
-            #"activeness": (raw["num_likes"] / raw["num_posts"]),
+            #"activeness": (raw["num_likes"] / (raw["num_posts"] ** 1.5))**0.5,
+            #"activeness": (raw["num_likes"] / (raw["num_posts"] ** 1.5))**0.5,
+            "activeness": (raw["num_likes"] / raw["num_posts"]),
         }
     )
 
