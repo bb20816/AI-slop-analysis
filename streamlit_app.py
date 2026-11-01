@@ -104,12 +104,15 @@ def slop_timeline_chart(series: dict[str, pd.DataFrame], colors: dict) -> alt.La
     y_title = "AI slop 비율 (%)"
     scale = alt.Scale(domainMin=0)
 
-    line = (
+    y = alt.Y("AI slop 비율(%):Q", title=y_title, scale=scale)
+    line = alt.Chart(lines).mark_line(strokeWidth=1.5).encode(x=x, y=y, color=color)
+    # 점은 보이지 않게(opacity=0) 두고 마우스를 올렸을 때 값만 알려 준다.
+    hover = (
         alt.Chart(lines)
-        .mark_line(strokeWidth=1.5, point=alt.OverlayMarkDef(size=18))
+        .mark_point(opacity=0, size=80)
         .encode(
             x=x,
-            y=alt.Y("AI slop 비율(%):Q", title=y_title, scale=scale),
+            y=y,
             color=color,
             tooltip=[
                 "사이트:N",
@@ -127,7 +130,7 @@ def slop_timeline_chart(series: dict[str, pd.DataFrame], colors: dict) -> alt.La
             tooltip=["사이트:N", alt.Tooltip("전체 구간 평균(%):Q", format=".2f")],
         )
     )
-    return (line + average).properties(height=340)
+    return (line + hover + average).properties(height=340)
 
 
 def decline_chart(
