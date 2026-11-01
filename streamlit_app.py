@@ -277,7 +277,7 @@ st.markdown('<div style="height: 24px;"></div>', unsafe_allow_html=True)
 
 st.subheader("해결책과 제안")
 st.markdown(
-    "고로 플랫폼 운영자들은 스스로 유저들이 만든 AI slop 콘텐츠에 대해 경고, 차단, 또는 삭 등의 조치를 취해야 합니다.  \n"
+    "고로 플랫폼 운영자들은 스스로 유저들이 만든 AI slop 콘텐츠에 대해 경고, 차단, 또는 삭제 등의 조치를 취해야 합니다.  \n"
     "실제로 음원 플랫폼 spotify는 저품질 및 스팸성 AI 생성 음원 5,000만 곡 이상을 사용자 추천(피드) 목록에서 차단했습니다.( https://www.yna.co.kr/view/AKR20261021083600009 )"
 )
 st.divider()
