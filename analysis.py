@@ -14,12 +14,29 @@ import pandas as pd
 DATA_DIR = Path(__file__).parent / "data"
 DAYS_PER_YEAR = 365.25
 INDEX_BASE = 100.0
+EDGE_FRACTION = 0.1  # 과거/현재 활성화도를 구할 때 구간 처음·끝에서 쓰는 데이터 비율
+
+# 사이트별 AI slop 비율 CSV (date, ai_percentage 열 사용)
+SLOP_FILES = {
+    "Bluesky": "bluesky_ai_slop.csv",
+    "Steam": "steam_ai_slop.csv",
+    "Mastodon": "mastodon_ai_slop.csv",
+}
 
 
 @dataclass(frozen=True)
 class Trend:
     points: pd.DataFrame  # date, index(평균=100), fit(추세선)
     slope_pct_per_year: float
+
+
+@dataclass(frozen=True)
+class EdgeChange:
+    past: float  # 구간 처음 EDGE_FRACTION 평균 (원래 단위)
+    current: float  # 구간 끝 EDGE_FRACTION 평균 (원래 단위)
+    rows: int  # 과거·현재 각각에 쓴 데이터 개수
+    current_index: float  # 과거를 100으로 했을 때의 현재 값
+    change_pct: float  # 현재 지수 - 100 (음수면 감소)
 
 
 @dataclass(frozen=True)
@@ -52,6 +69,36 @@ def trend(
     return Trend(points=points, slope_pct_per_year=float(slope))
 
 
+def edge_change(
+    df: pd.DataFrame,
+    start: date | None = None,
+    end: date | None = None,
+    fraction: float = EDGE_FRACTION,
+) -> EdgeChange:
+    """start~end 구간의 처음·끝 fraction 만큼의 평균을 과거·현재 활성화도로 비교한다."""
+    if start is not None:
+        df = df[df["date"] >= pd.Timestamp(start)]
+    if end is not None:
+        df = df[df["date"] <= pd.Timestamp(end)]
+    if len(df) < 2:
+        raise ValueError("과거와 현재를 비교하려면 데이터가 2개 이상 필요합니다.")
+    values = df.sort_values("date")["activeness"]
+
+    rows = min(max(1, round(len(values) * fraction)), len(values) // 2)
+    past = float(values.iloc[:rows].mean())
+    current = float(values.iloc[-rows:].mean())
+    if past <= 0:
+        raise ValueError("과거 활성화도가 0 이하라 비율을 구할 수 없습니다.")
+    current_index = current / past * INDEX_BASE
+    return EdgeChange(
+        past=past,
+        current=current,
+        rows=rows,
+        current_index=current_index,
+        change_pct=current_index - INDEX_BASE,
+    )
+
+
 def decline_slop_correlation(slopes: dict[str, float], slop: dict[str, float]) -> float:
     """하락폭(-기울기)과 AI slop 비율의 피어슨 상관계수."""
     names = list(slop)
@@ -60,15 +107,19 @@ def decline_slop_correlation(slopes: dict[str, float], slop: dict[str, float]) -
 
 
 def load_bluesky(path: Path) -> pd.DataFrame:
-    # 활성화도 = 좋아요 / 게시물 수². a로 표시된 행은 앞뒤 평균으로 대체한 값이므로 포함한다.
+    # 활성화도 = 좋아요 / 게시물 수^1.3 (플랫폼 특성을 고려해 지수를 1.3으로 정함). a로 표시된 행은 앞뒤 평균으로 대체한 값이므로 포함한다.
     # CSV의 활성화도 열은 좋아요·게시물을 보정한 뒤 갱신되지 않은 행이 있어 쓰지 않는다.
     raw = pd.read_csv(path, encoding="cp949", encoding_errors="replace")
     return pd.DataFrame(
         {
             "date": pd.to_datetime(raw["date"]),
+<<<<<<< HEAD
             "activeness": (raw["num_likes"] / (raw["num_posts"] ** 1.3))**1,
             #"activeness": (raw["num_likes"] / (raw["num_posts"] ** 1.5))**0.5,
             #"activeness": (raw["num_likes"] / raw["num_posts"]),
+=======
+            "activeness": raw["num_likes"] / (raw["num_posts"] ** 1.3),
+>>>>>>> 29c5f93 (수정 계획서 내용으로 그래프들 추가 및 삭제)
         }
     )
 
@@ -99,6 +150,23 @@ def load_steam(path: Path) -> pd.DataFrame:
 def load_slop_average(path: Path) -> float:
     raw = pd.read_csv(path, encoding="utf-8-sig")
     return float(raw["average ai_percentage"].dropna().iloc[0])
+
+
+def load_slop_series(path: Path) -> pd.DataFrame:
+    """날짜별 AI slop 비율(date, ai_percentage). 값이 비어 있는 행은 뺀다."""
+    raw = pd.read_csv(path, encoding="utf-8-sig")
+    series = pd.DataFrame(
+        {
+            "date": pd.to_datetime(raw["date"]),
+            "ai_percentage": raw["ai_percentage"].astype(float),
+        }
+    )
+    return series.dropna().sort_values("date").reset_index(drop=True)
+
+
+def load_slop_series_all(data_dir: Path = DATA_DIR) -> dict[str, pd.DataFrame]:
+    """{사이트: 날짜별 AI slop 비율}"""
+    return {name: load_slop_series(data_dir / file) for name, file in SLOP_FILES.items()}
 
 
 def load_sites(data_dir: Path = DATA_DIR) -> dict[str, tuple[pd.DataFrame, float]]:
