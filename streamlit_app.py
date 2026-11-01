@@ -270,7 +270,7 @@ st.markdown(
     "AI slop이 늘어날수록 활성화도가 줄어듭니다.  \n"
     "중앙 일보 2026.02.09 기사  “ ‘돈’ 같지만 ‘독’이다…‘AI 쓰레기’ 단속 나선 플랫폼들”"
     "( https://www.joongang.co.kr/article/25403514 )에 따르면  \n"
-    "AI slop이 플랫폼의 사용자 경험을 악화하기 때문에, AI slop과 활성화도의 상관관계는 인과관계로 해석할 수 있습다."
+    "AI slop이 플랫폼의 사용자 경험을 악화하기 때문에, AI slop과 활성화도의 상관관계는 인과관계로 해석할 수 있습니다."
 )
 st.divider()
 st.markdown('<div style="height: 24px;"></div>', unsafe_allow_html=True)
