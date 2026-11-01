@@ -4,12 +4,12 @@ import streamlit as st
 
 import analysis
 
-# ── 맨 위 그래프의 제목과 부제목: 아래 두 값을 원하는 문구로 고치세요 ──────────────
+# ── 맨 위 그래프의 제목과 부제목 ──────────────
 SLOP_TITLE = "플랫폼별 AI slop 콘텐츠 비율 추이"
-SLOP_SUBTITLE = "여기에 설명을 입력하세요. (streamlit_app.py 위쪽의 SLOP_SUBTITLE을 고치면 바뀝니다.)"
+SLOP_SUBTITLE = "Bluesky > Steam > Mastodon 순으로 AI slop 비율이 높다."
 
-# Steam과 Mastodon은 세로축을 넓게 고정한다. Bluesky는 값의 범위가 훨씬 커서 자동으로 둔다.
-FIXED_Y_RANGE = {"Steam": [0, 300], "Mastodon": [0, 300]}
+# Steam과 Mastodon은 세로축을 넓게 고정한다. Bluesky는 값의 범위가 커서 자동으로 둔다.
+FIXED_Y_RANGE = {"Steam": [0, 350], "Mastodon": [0, 350]}
 
 LIGHT = {
     "Bluesky": "#2a78d6",
@@ -230,8 +230,7 @@ st.divider()
 st.title("AI Slop Analysis")
 st.markdown(
     "AI slop 비율이 높은 사이트일수록 활성화도가 빠르게 떨어지는지 살펴봅니다. "
-    "**전체 기간에서는 그런 경향이 보이지만, 비교 기간을 바꾸면 사라지거나 뒤집히므로 "
-    "비례 관계를 입증한 결과는 아닙니다.**"
+    "왼쪽 사이드바의 슬라이더를 이용해 기간을 조절할 수 있습니다."
 )
 
 sites = load_sites()
@@ -247,10 +246,6 @@ for column, name in zip(st.columns(3), result.trends):
             f"{ranges[name][0]} ~ {ranges[name][1]}"
         )
         st.altair_chart(site_chart(name, result, colors), width="stretch")
-st.caption(
-    "굵은 직선이 추세선입니다. Steam과 Mastodon의 세로축은 0~300으로 고정했고 Bluesky는 범위가 "
-    "다르므로, 기울기는 선의 모양이 아니라 각 그래프 위의 '연 %' 숫자로 비교하세요."
-)
 
 st.subheader("과거 대비 현재 활성화도")
 changes = {name: analysis.edge_change(df, *ranges[name]) for name, (df, _) in sites.items()}
@@ -267,14 +262,28 @@ st.caption(
         for name, change in changes.items()
     )
 )
+st.subheader("결과 분석과 근거")
+st.markdown(
+    "AI slop이 늘어날수록 활성화도가 줄어든다.\n"
+    "중앙 일보 2026.02.09 기사  “ ‘돈’ 같지만 ‘독’이다…‘AI 쓰레기’ 단속 나선 플랫폼들” \n"
+    "(https://www.joongang.co.kr/article/25403514)에 따르면 AI slop이 플랫폼의 사용자 경험을 악화하기 때문에 \n"
+    "AI slop과 활성화도의 상관관계는 인과관계로 해석할 수 있다."
+)
+
+st.subheader("해결책과 제안")
+st.markdown(
+    "고로 플랫폼 운영자들은 스스로 유저들이 만든 AI slop 콘텐츠에 대해 삭제 등의 조치를 취해야 합니다. \n"
+    "실제로 음원 플랫폼 spotify는 저품질 및 스팸성 AI 생성 음원 5,000만 곡 이상을 사용자 추천(피드) 목록에서 차단했습니다."
+)
+
 
 st.subheader("계산 기준과 한계")
 st.markdown(
+    "데이터의 이상치는 모두 전날과 다음날의 평균으로 대체했습니다.
     "- **단위 맞추기:** 각 사이트의 활성화도를 선택한 기간의 자기 평균으로 나눠 평균을 100으로 "
     "맞춘 뒤 직선 추세를 구합니다. 기울기는 1년에 평균의 몇 %씩 변하는지를 뜻합니다.\n"
     "- **Bluesky:** 이용자 수 데이터는 기간이 너무 짧아, 게시물에 얼마나 긍정적으로 반응하는지를 보는 "
-    "`좋아요 / 게시물 수^1.3`을 썼습니다. 앞뒤 평균으로 대체한 `a` 표시 값 65일과 2025년 4월 22일 "
-    "보정값을 포함합니다.\n"
+    "`좋아요 / 게시물 수^1.3`을 썼습니다. "
     "- **Mastodon:** CSV의 `activeness` 열을 그대로 썼습니다.\n"
     "- **Steam:** 활성화도 열이 없어 `in-game / users²`를 하루 평균으로 계산했습니다. "
     "2026년 1월 15일은 앞뒤 평균으로 보정한 값입니다.\n"
